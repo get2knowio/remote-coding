@@ -29,6 +29,10 @@
     mode: '0755'
   loop:
     - .codex
+    - .config/opencode
+    - .config/gh
+    - .coderabbit
+    - .local/bin
 
 - name: Verify g2k user exists
   ansible.builtin.command: id {{ g2k_user }}
