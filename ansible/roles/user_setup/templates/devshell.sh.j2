@@ -88,3 +88,8 @@ devcontainer up --workspace-folder "$WORKSPACE_DIR"
 
 # Execute a shell inside the devcontainer
 devcontainer exec --workspace-folder "$WORKSPACE_DIR" /bin/bash -c 'if command -v zsh &> /dev/null; then exec zsh; else exec bash; fi'
+
+# When we exit the devcontainer, rename tab back to "host"
+if [ -n "$ZELLIJ" ]; then
+    zellij action rename-tab "host"
+fi
