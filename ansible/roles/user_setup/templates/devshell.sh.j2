@@ -79,11 +79,9 @@ fi
 
 # If we're inside a zellij session, open a new tab named after the project
 if [ -n "$ZELLIJ" ]; then
-    # Create a new tab with the project name and run the devcontainer there
-    zellij action new-tab --name "$REPO_NAME"
-    # The new tab starts in $HOME, so we need to cd and run devcontainer
-    zellij action write-chars "cd '$WORKSPACE_DIR' && devcontainer up --workspace-folder '$WORKSPACE_DIR' && devcontainer exec --workspace-folder '$WORKSPACE_DIR' /bin/bash -c 'if command -v zsh &> /dev/null; then exec zsh; else exec bash; fi'"
-    zellij action write 10  # Send Enter key
+    # Create a new tab with the project name and directly run the devcontainer command
+    # Using --cwd and -- to pass the command directly avoids the "Waiting to run" prompt
+    zellij action new-tab --name "$REPO_NAME" --cwd "$WORKSPACE_DIR" -- bash -c "devcontainer up --workspace-folder '$WORKSPACE_DIR' && devcontainer exec --workspace-folder '$WORKSPACE_DIR' /bin/bash -c 'if command -v zsh &> /dev/null; then exec zsh; else exec bash; fi'; exec bash"
     exit 0
 fi
 
