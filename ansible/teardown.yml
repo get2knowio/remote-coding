@@ -1,0 +1,114 @@
+---
+# Teardown playbook - Destroys Hetzner server and optionally the persistent volume
+# Usage:
+#   ./run.sh teardown.yml                        # Destroy server only (keep volume)
+#   ./run.sh teardown.yml -e remove_volume=true  # Destroy server AND volume
+
+- name: Tear down Hetzner Cloud Resources
+  hosts: localhost
+  gather_facts: false
+  vars:
+    # By default, keep the volume to preserve data
+    remove_volume: false
+
+  tasks:
+    - name: Display teardown warning
+      ansible.builtin.debug:
+        msg: |
+          WARNING: This will destroy the following resources:
+          - Server: {{ hetzner_server_name }}
+          - Firewall: {{ hetzner_server_name }}-firewall
+          {% if remove_volume | bool %}
+          - Volume: {{ hetzner_volume_name }} (ALL DATA WILL BE LOST!)
+          {% else %}
+          - Volume: {{ hetzner_volume_name }} (will be PRESERVED)
+          {% endif %}
+
+    - name: Confirm teardown
+      ansible.builtin.pause:
+        prompt: "Are you sure you want to proceed? (yes/no)"
+      register: confirm_teardown
+      when: not (auto_confirm | default(false) | bool)
+
+    - name: Abort if not confirmed
+      ansible.builtin.fail:
+        msg: "Teardown aborted by user"
+      when:
+        - not (auto_confirm | default(false) | bool)
+        - confirm_teardown.user_input | lower != 'yes'
+
+    - name: Delete Hetzner Cloud server
+      hetzner.hcloud.server:
+        api_token: "{{ hetzner_api_token }}"
+        name: "{{ hetzner_server_name }}"
+        state: absent
+      register: server_delete_result
+
+    - name: Display server deletion result
+      ansible.builtin.debug:
+        msg: "Server '{{ hetzner_server_name }}' deleted successfully"
+      when: server_delete_result is changed
+
+    - name: Display server not found message
+      ansible.builtin.debug:
+        msg: "Server '{{ hetzner_server_name }}' was not found (already deleted or never created)"
+      when: server_delete_result is not changed
+
+    - name: Delete firewall
+      hetzner.hcloud.firewall:
+        api_token: "{{ hetzner_api_token }}"
+        name: "{{ hetzner_server_name }}-firewall"
+        state: absent
+      register: firewall_delete_result
+
+    - name: Display firewall deletion result
+      ansible.builtin.debug:
+        msg: "Firewall '{{ hetzner_server_name }}-firewall' deleted successfully"
+      when: firewall_delete_result is changed
+
+    - name: Delete volume (if requested)
+      hetzner.hcloud.volume:
+        api_token: "{{ hetzner_api_token }}"
+        name: "{{ hetzner_volume_name }}"
+        state: absent
+      register: volume_delete_result
+      when: remove_volume | bool
+
+    - name: Display volume deletion result
+      ansible.builtin.debug:
+        msg: "Volume '{{ hetzner_volume_name }}' deleted successfully - ALL DATA HAS BEEN REMOVED"
+      when:
+        - remove_volume | bool
+        - volume_delete_result is changed
+
+    - name: Display volume preserved message
+      ansible.builtin.debug:
+        msg: |
+          Volume '{{ hetzner_volume_name }}' has been PRESERVED.
+          Your data in /home/g2k will be available when you provision a new server.
+          To remove the volume and all data, run:
+            ./run.sh teardown.yml -e remove_volume=true
+      when: not (remove_volume | bool)
+
+    - name: Display completion message
+      ansible.builtin.debug:
+        msg: |
+          Teardown complete!
+
+          Deleted resources:
+          - Server: {{ hetzner_server_name }}
+          - Firewall: {{ hetzner_server_name }}-firewall
+          {% if remove_volume | bool %}
+          - Volume: {{ hetzner_volume_name }}
+          {% endif %}
+
+          {% if not remove_volume | bool %}
+          Preserved resources:
+          - Volume: {{ hetzner_volume_name }} ({{ hetzner_volume_size }}GB)
+
+          To reprovision the server with the same volume:
+            ./run.sh site.yml
+          {% else %}
+          All resources have been removed. To start fresh:
+            ./run.sh site.yml
+          {% endif %}

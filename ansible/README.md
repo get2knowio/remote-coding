@@ -141,6 +141,7 @@ remote-coding/
     ├── site.yml                 # Main playbook (full workflow)
     ├── provision.yml            # Server provisioning playbook
     ├── configure.yml            # Server configuration playbook
+    ├── teardown.yml             # Server teardown playbook
     ├── inventory/
     │   └── hosts.yml            # Dynamic inventory
     ├── group_vars/
@@ -246,19 +247,28 @@ ssh g2k@<server-ip>
 ssh g2k@<your-subdomain>.duckdns.org
 ```
 
-## Cleanup
+## Cleanup / Teardown
 
-To destroy the server:
+To tear down the server and associated resources:
 
 ```bash
-# Using Hetzner Cloud CLI
-hcloud server delete remote-coding-server
+# Destroy server only (keeps the volume for data persistence)
+./run.sh teardown.yml
 
-# Or using the API
-curl -X DELETE \
-  -H "Authorization: Bearer $HETZNER_API_TOKEN" \
-  "https://api.hetzner.cloud/v1/servers/<server-id>"
+# Destroy server AND volume (removes all data)
+./run.sh teardown.yml -e remove_volume=true
+
+# Skip confirmation prompt (for automation)
+./run.sh teardown.yml -e auto_confirm=true
+./run.sh teardown.yml -e remove_volume=true -e auto_confirm=true
 ```
+
+The teardown playbook will:
+- Delete the Hetzner Cloud server
+- Delete the associated firewall
+- Optionally delete the persistent volume (when `remove_volume=true`)
+
+**Note**: By default, the volume is preserved so your data in `/home/g2k` persists. When you run `site.yml` again, the new server will mount the same volume with all your data intact.
 
 ## Troubleshooting
 

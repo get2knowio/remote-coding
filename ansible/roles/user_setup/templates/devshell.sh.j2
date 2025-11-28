@@ -1,16 +1,85 @@
 #!/bin/bash
-# devshell - Launch a devcontainer shell for the project
+# devshell - Launch a devcontainer shell for a project
 # Managed by Ansible - do not edit manually
+#
+# Usage: devshell <repo>        - Start/attach to devcontainer for <repo>
+#        devshell               - List available projects
+#        devshell <repo> clone <github-url>  - Clone a repo and start devcontainer
 
 set -e
 
-DEV_WORKSPACE_DIR="{{ dev_workspace_dir }}"
+PROJECTS_DIR="{{ dev_workspace_dir }}"
+
+show_usage() {
+    echo "Usage: devshell <repo> [clone <github-url>]"
+    echo ""
+    echo "Commands:"
+    echo "  devshell <repo>                    Start/attach to devcontainer for <repo>"
+    echo "  devshell <repo> clone <github-url> Clone repo and start devcontainer"
+    echo ""
+    echo "Available projects in $PROJECTS_DIR:"
+    if [ -d "$PROJECTS_DIR" ] && [ "$(ls -A "$PROJECTS_DIR" 2>/dev/null)" ]; then
+        for dir in "$PROJECTS_DIR"/*/; do
+            if [ -d "$dir" ]; then
+                repo_name=$(basename "$dir")
+                if [ -d "$dir/.devcontainer" ]; then
+                    echo "  $repo_name (has .devcontainer)"
+                else
+                    echo "  $repo_name"
+                fi
+            fi
+        done
+    else
+        echo "  (no projects found)"
+    fi
+}
+
+if [ -z "$1" ]; then
+    show_usage
+    exit 0
+fi
+
+REPO_NAME="$1"
+WORKSPACE_DIR="$PROJECTS_DIR/$REPO_NAME"
+
+# Handle clone command
+if [ "$2" = "clone" ]; then
+    if [ -z "$3" ]; then
+        echo "Error: Please provide a GitHub URL to clone"
+        echo "Usage: devshell <repo> clone <github-url>"
+        exit 1
+    fi
+    GITHUB_URL="$3"
+    
+    if [ -d "$WORKSPACE_DIR" ]; then
+        echo "Error: Directory $WORKSPACE_DIR already exists"
+        exit 1
+    fi
+    
+    echo "Cloning $GITHUB_URL to $WORKSPACE_DIR..."
+    git clone "$GITHUB_URL" "$WORKSPACE_DIR"
+fi
+
+# Verify project directory exists
+if [ ! -d "$WORKSPACE_DIR" ]; then
+    echo "Error: Project directory not found: $WORKSPACE_DIR"
+    echo ""
+    show_usage
+    exit 1
+fi
 
 # Change to project directory
-cd "$DEV_WORKSPACE_DIR"
+cd "$WORKSPACE_DIR"
+
+# Check for devcontainer configuration
+if [ ! -d ".devcontainer" ] && [ ! -f ".devcontainer.json" ]; then
+    echo "Warning: No .devcontainer configuration found in $WORKSPACE_DIR"
+    echo "Starting devcontainer anyway (will use default configuration)..."
+fi
 
 # Start the devcontainer if not already running
-devcontainer up --workspace-folder "$DEV_WORKSPACE_DIR"
+echo "Starting devcontainer for $REPO_NAME..."
+devcontainer up --workspace-folder "$WORKSPACE_DIR"
 
 # Execute a shell inside the devcontainer
-devcontainer exec --workspace-folder "$DEV_WORKSPACE_DIR" zsh
+devcontainer exec --workspace-folder "$WORKSPACE_DIR" /bin/bash -c 'if command -v zsh &> /dev/null; then exec zsh; else exec bash; fi'

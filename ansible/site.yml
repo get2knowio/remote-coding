@@ -18,6 +18,8 @@
   hosts: provisioned
   become: true
   gather_facts: true
+  vars:
+    g2k_volume_device: "{{ hostvars['localhost']['hetzner_volume_device'] | default('') }}"
 
   pre_tasks:
     - name: Wait for apt to be ready
@@ -31,6 +33,11 @@
       ansible.builtin.apt:
         update_cache: true
         cache_valid_time: 3600
+
+    - name: Upgrade all packages
+      ansible.builtin.apt:
+        upgrade: dist
+        autoremove: true
 
   roles:
     - role: docker
@@ -49,6 +56,7 @@
           Server Information:
           - IP Address: {{ ansible_host }}
           - DuckDNS Domain: {{ duckdns_domain }}.duckdns.org
+          - Persistent Volume: {{ hostvars['localhost']['hetzner_volume_device'] | default('none') }}
 
           Installed:
           - Docker (with docker-compose plugin)
@@ -66,8 +74,11 @@
 
           Firewall:
           - SSH (port 22) - allowed
-          - HTTPS (port 443) - allowed
           - All other ports - blocked
 
+          Storage:
+          - /home/g2k is mounted on persistent volume
+          - Data persists when server is destroyed
+
           You can now SSH to the server as the g2k user:
-          ssh g2k@{{ ansible_host }}
+          ssh g2k@{{ duckdns_domain }}.duckdns.org

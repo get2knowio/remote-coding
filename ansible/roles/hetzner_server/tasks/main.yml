@@ -1,10 +1,21 @@
 ---
+- name: Check if hcloud Python library is available
+  delegate_to: localhost
+  become: false
+  ansible.builtin.command:
+    cmd: "{{ ansible_playbook_python }} -c 'import hcloud'"
+  register: hcloud_check
+  changed_when: false
+  failed_when: false
+
 - name: Ensure hcloud Python library is installed
   delegate_to: localhost
   become: false
   ansible.builtin.pip:
     name: hcloud
     state: present
+    executable: "{{ ansible_playbook_python | dirname }}/pip"
+  when: hcloud_check.rc != 0
 
 - name: Create SSH key in Hetzner Cloud
   delegate_to: localhost
@@ -16,7 +27,7 @@
     state: present
   register: hetzner_server_ssh_key
 
-- name: Create firewall with SSL-only rules
+- name: Create firewall with SSH-only rules
   delegate_to: localhost
   become: false
   hetzner.hcloud.firewall:
@@ -27,13 +38,6 @@
         direction: in
         protocol: tcp
         port: "22"
-        source_ips:
-          - 0.0.0.0/0
-          - ::/0
-      - description: "Allow HTTPS"
-        direction: in
-        protocol: tcp
-        port: "443"
         source_ips:
           - 0.0.0.0/0
           - ::/0
@@ -56,9 +60,44 @@
     state: present
   register: hetzner_server_result
 
+- name: Create persistent volume for home directory
+  delegate_to: localhost
+  become: false
+  hetzner.hcloud.volume:
+    api_token: "{{ hetzner_api_token }}"
+    name: "{{ hetzner_volume_name }}"
+    size: "{{ hetzner_volume_size }}"
+    location: "{{ hetzner_location }}"
+    state: present
+  register: hetzner_volume_result
+
+- name: Resize volume if needed
+  delegate_to: localhost
+  become: false
+  hetzner.hcloud.volume:
+    api_token: "{{ hetzner_api_token }}"
+    name: "{{ hetzner_volume_name }}"
+    size: "{{ hetzner_volume_size }}"
+    state: present
+  when: hetzner_volume_result.hcloud_volume.size < hetzner_volume_size | int
+
+- name: Attach volume to server
+  delegate_to: localhost
+  become: false
+  hetzner.hcloud.volume:
+    api_token: "{{ hetzner_api_token }}"
+    name: "{{ hetzner_volume_name }}"
+    server: "{{ hetzner_server_name }}"
+    state: present
+
 - name: Set server IP fact
   ansible.builtin.set_fact:
     hetzner_server_ip: "{{ hetzner_server_result.hcloud_server.ipv4_address }}"
+
+- name: Set volume device fact
+  ansible.builtin.set_fact:
+    hetzner_volume_device: "/dev/disk/by-id/scsi-0HC_Volume_{{ hetzner_volume_result.hcloud_volume.id }}"
+    hetzner_volume_size_bytes: "{{ hetzner_volume_size | int * 1024 * 1024 * 1024 }}"
 
 - name: Display server information
   ansible.builtin.debug:

@@ -1,10 +1,96 @@
 ---
+# Volume setup must happen BEFORE creating the user
+- name: Check if volume device exists
+  ansible.builtin.stat:
+    path: "{{ g2k_volume_device }}"
+  register: volume_device_stat
+  when: g2k_volume_device | length > 0
+
+- name: Check if volume is already formatted
+  ansible.builtin.command:
+    cmd: "blkid {{ g2k_volume_device }}"
+  register: volume_blkid
+  changed_when: false
+  failed_when: false
+  when:
+    - g2k_volume_device | length > 0
+    - volume_device_stat.stat.exists | default(false)
+
+- name: Format volume with ext4 filesystem
+  ansible.builtin.filesystem:
+    fstype: ext4
+    dev: "{{ g2k_volume_device }}"
+  when:
+    - g2k_volume_device | length > 0
+    - volume_device_stat.stat.exists | default(false)
+    - volume_blkid.rc != 0
+
+- name: Create temporary mount point for home directory
+  ansible.builtin.file:
+    path: "/home/{{ g2k_user }}"
+    state: directory
+    mode: '0755'
+  when:
+    - g2k_volume_device | length > 0
+    - volume_device_stat.stat.exists | default(false)
+
+- name: Mount volume as user home directory
+  ansible.posix.mount:
+    path: "/home/{{ g2k_user }}"
+    src: "{{ g2k_volume_device }}"
+    fstype: ext4
+    opts: defaults,nofail
+    state: mounted
+  when:
+    - g2k_volume_device | length > 0
+    - volume_device_stat.stat.exists | default(false)
+
+- name: Resize filesystem if volume was resized
+  ansible.builtin.command:
+    cmd: "resize2fs {{ g2k_volume_device }}"
+  register: resize_result
+  changed_when: "'Nothing to do' not in resize_result.stderr"
+  when:
+    - g2k_volume_device | length > 0
+    - volume_device_stat.stat.exists | default(false)
+
 - name: Create g2k user
   ansible.builtin.user:
     name: "{{ g2k_user }}"
     shell: /bin/bash
     create_home: true
     state: present
+
+- name: Ensure home directory has correct ownership
+  ansible.builtin.file:
+    path: "/home/{{ g2k_user }}"
+    owner: "{{ g2k_user }}"
+    group: "{{ g2k_user }}"
+    mode: '0755'
+    state: directory
+
+- name: Create .ssh directory for g2k user
+  ansible.builtin.file:
+    path: "/home/{{ g2k_user }}/.ssh"
+    state: directory
+    owner: "{{ g2k_user }}"
+    group: "{{ g2k_user }}"
+    mode: '0700'
+
+- name: Check if authorized_keys already exists for g2k user
+  ansible.builtin.stat:
+    path: "/home/{{ g2k_user }}/.ssh/authorized_keys"
+  register: g2k_authorized_keys
+
+- name: Copy authorized_keys from root to g2k user
+  ansible.builtin.copy:
+    src: /root/.ssh/authorized_keys
+    dest: "/home/{{ g2k_user }}/.ssh/authorized_keys"
+    remote_src: true
+    owner: "{{ g2k_user }}"
+    group: "{{ g2k_user }}"
+    mode: '0600'
+  when: not g2k_authorized_keys.stat.exists
 
 - name: Add g2k user to docker group
   ansible.builtin.user:
@@ -34,7 +120,7 @@
     - .coderabbit
     - .local/bin
 
-- name: Create development workspace directory
+- name: Create projects directory
   ansible.builtin.file:
     path: "{{ dev_workspace_dir }}"
     state: directory
@@ -75,6 +161,20 @@
     group: "{{ g2k_user }}"
     mode: '0644'
     insertafter: EOF
+
+- name: Ensure .bash_profile sources .bashrc for login shells
+  ansible.builtin.blockinfile:
+    path: "/home/{{ g2k_user }}/.bash_profile"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - BASHRC"
+    block: |
+      # Source .bashrc for interactive login shells (like SSH)
+      if [ -f "$HOME/.bashrc" ]; then
+          source "$HOME/.bashrc"
+      fi
+    create: true
+    owner: "{{ g2k_user }}"
+    group: "{{ g2k_user }}"
+    mode: '0644'
 
 - name: Install devshell helper script
   ansible.builtin.template:
