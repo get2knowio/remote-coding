@@ -138,29 +138,19 @@ main() {
 
     clear
     echo ""
-    # Futuristic ASCII banner
+    # Futuristic ASCII banner in cyan
     echo -e "\033[36m"
     if command -v figlet &> /dev/null; then
-        figlet -f slant "remo" 2>/dev/null || cat << 'BANNER'
-╭─────────────────────────────────────╮
-│  ██████╗ ███████╗███╗   ███╗ ██████╗│
-│  ██╔══██╗██╔════╝████╗ ████║██╔═══██╗
-│  ██████╔╝█████╗  ██╔████╔██║██║   ██║│
-│  ██╔══██╗██╔══╝  ██║╚██╔╝██║██║   ██║│
-│  ██║  ██║███████╗██║ ╚═╝ ██║╚██████╔╝│
-│  ╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝ ╚═════╝ │
-╰─────────────────────────────────────╯
-BANNER
+        figlet -f slant "remo"
     else
+        # Fallback ASCII art if figlet not installed
         cat << 'BANNER'
-╭─────────────────────────────────────╮
-│  ██████╗ ███████╗███╗   ███╗ ██████╗│
-│  ██╔══██╗██╔════╝████╗ ████║██╔═══██╗
-│  ██████╔╝█████╗  ██╔████╔██║██║   ██║│
-│  ██╔══██╗██╔══╝  ██║╚██╔╝██║██║   ██║│
-│  ██║  ██║███████╗██║ ╚═╝ ██║╚██████╔╝│
-│  ╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝ ╚═════╝ │
-╰─────────────────────────────────────╯
+                                
+   _ __ ___ _ __ ___   ___  
+  | '__/ _ \ '_ ` _ \ / _ \ 
+  | | |  __/ | | | | | (_) |
+  |_|  \___|_| |_| |_|\___/ 
+                            
 BANNER
     fi
     echo -e "\033[0m"
@@ -170,10 +160,9 @@ BANNER
     while true; do
         local selection
         selection=$(show_menu) || {
-            # User pressed Ctrl+C or Escape
+            # User pressed Ctrl+C or Escape - exit with code 1
             echo ""
-            echo "Exiting to shell. Run 'project-menu' to return."
-            break
+            exit 1
         }
 
         case "$selection" in
@@ -187,7 +176,7 @@ BANNER
             "[Exit to shell]")
                 echo ""
                 echo "Exiting to shell. Run 'project-menu' to return."
-                break
+                exit 0
                 ;;
             *" - active")
                 # Extract project name (remove " - active" suffix)
