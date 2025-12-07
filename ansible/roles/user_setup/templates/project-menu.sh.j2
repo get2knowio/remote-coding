@@ -59,7 +59,8 @@ build_menu_options() {
 get_banner() {
     local banner=""
     if command -v figlet &> /dev/null; then
-        banner=$(figlet -f slant "remo" 2>/dev/null)
+        # Trim leading/trailing blank lines from figlet output
+        banner=$(figlet -f slant "remo" 2>/dev/null | sed '/^[[:space:]]*$/d')
     fi
     
     if [ -z "$banner" ]; then
