@@ -55,16 +55,38 @@ build_menu_options() {
     printf '%s\n' "${options[@]}"
 }
 
+# Generate the banner text
+get_banner() {
+    local banner=""
+    if command -v figlet &> /dev/null; then
+        banner=$(figlet -f slant "remo" 2>/dev/null)
+    fi
+    
+    if [ -z "$banner" ]; then
+        # Fallback ASCII art if figlet not installed or failed
+        banner='   ____ ___ _ __ ___   ___  
+  | __// _ \  _ ` _ \ / _ \ 
+  | | |  __/ | | | | | (_) |
+  |_|  \___|_| |_| |_|\___/ '
+    fi
+    echo "$banner"
+}
+
 # Display menu and get selection
 show_menu() {
     local options
+    local header
     options=$(build_menu_options)
+    
+    # Build header with banner
+    header=$(printf '\033[36m%s\033[0m\n\n  \033[90m[ Remote Coding Server ]\033[0m\n\nSelect a project (↑↓ to navigate, Enter to select):' "$(get_banner)")
 
     echo "$options" | fzf --reverse --no-info \
-        --header="Select a project (↑↓ to navigate, Enter to select):" \
+        --header="$header" \
         --pointer=">" \
         --prompt="" \
-        --color="header:bold"
+        --color="header:bold" \
+        --ansi
 }
 
 # Handle cloning a new repo
@@ -136,27 +158,6 @@ main() {
         exit 1
     fi
 
-    clear
-    echo ""
-    # Futuristic ASCII banner in cyan
-    echo -e "\033[36m"
-    if command -v figlet &> /dev/null; then
-        figlet -f slant "remo"
-    else
-        # Fallback ASCII art if figlet not installed
-        cat << 'BANNER'
-                                
-   _ __ ___ _ __ ___   ___  
-  | '__/ _ \ '_ ` _ \ / _ \ 
-  | | |  __/ | | | | | (_) |
-  |_|  \___|_| |_| |_|\___/ 
-                            
-BANNER
-    fi
-    echo -e "\033[0m"
-    echo -e "  \033[90m[ Remote Coding Server ]\033[0m"
-    echo ""
-
     while true; do
         local selection
         selection=$(show_menu) || {
@@ -189,11 +190,7 @@ BANNER
                 ;;
         esac
 
-        # After detaching from zellij, show menu again
-        clear
-        echo ""
-        echo "  Detached from session"
-        echo ""
+        # After detaching from zellij, loop back to show menu again
     done
 }
 
