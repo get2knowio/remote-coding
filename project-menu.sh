@@ -60,11 +60,19 @@ show_menu() {
     local options
     options=$(build_menu_options)
 
+    # Count the number of project entries (excluding Clone and Exit options)
+    local project_count
+    project_count=$(echo "$options" | grep -c -v '^\[' || true)
+
     echo "$options" | fzf --reverse --no-info \
-        --header="Select a project (up/down to navigate, Enter to select):" \
+        --header="Select a project (1-9, up/down, Enter | c=clone, x=exit):" \
         --pointer=">" \
         --prompt="" \
-        --color="header:bold"
+        --color="header:bold" \
+        --bind="1:pos(1)+accept,2:pos(2)+accept,3:pos(3)+accept,4:pos(4)+accept,5:pos(5)+accept" \
+        --bind="6:pos(6)+accept,7:pos(7)+accept,8:pos(8)+accept,9:pos(9)+accept" \
+        --bind="c:pos($((project_count + 1)))+accept" \
+        --bind="x:pos($((project_count + 2)))+accept"
 }
 
 # Handle cloning a new repo
