@@ -4,7 +4,7 @@ Auto-generated from all feature plans. Last updated: 2026-07-27
 
 ## Constitution
 
-See `.specify/memory/constitution.md` (v2.0.1) for the full text. The eight
+See `.specify/memory/constitution.md` (v2.1.0) for the full text. The nine
 non-negotiable principles, in short:
 
 | # | Principle | One-line rule |
@@ -17,8 +17,10 @@ non-negotiable principles, in short:
 | VI | Test Every Path That Can Skip or Fail | Error/skip/abort paths are covered, not just the happy path |
 | VII | Idempotent and Re-runnable by Default | A second run is a no-op; registry writes go through `core/registry.py` |
 | VIII | Documentation Reflects Reality, and CI Proves It | Structure diagrams and docs ship in the same change as the code |
+| IX | Pre-Release Builds Never Touch PyPI | Test off-index (git ref → CI wheel); PyPI receives only final, working releases |
 
 Principles I, IV, and VIII are machine-enforced — see [Quality Gates](#quality-gates).
+Principle IX is a human gate — see [Pre-release testing](#pre-release-testing-principle-ix).
 
 ## Active Technologies
 - Ansible 2.14+ / YAML + `ansible.builtin`, `community.general` (existing), Incus CLI (local) (002-incus-container-support)
@@ -257,6 +259,14 @@ uv run remo web check             # Validate registry/SSH/runtime-dir/reachabili
 uv run remo web serve             # Run the browser terminal broker locally
 uv run remo web sync URL          # Bi-directional registry sync with a deployment (023)
 
+# Pre-release testing, off-index (Constitution IX) — PyPI gets only final releases
+uvx --from git+https://github.com/get2knowio/remo@BRANCH remo --help  # Tier 1, zero footprint
+uv tool install git+https://github.com/get2knowio/remo@BRANCH         # Tier 1, daily-drive the branch
+uv tool install "remo-cli[web] @ git+https://github.com/get2knowio/remo@BRANCH"  # with extras
+uv tool install remo-cli --force                                      # back to the released PyPI build
+gh workflow run dev-build.yml -f version=X.Y.ZrcN                     # Tier 2, real wheel in clean CI
+gh run download <run-id> -n remo-wheel -D ./dl && uv tool install --force ./dl/remo_cli-*.whl
+
 # Frontend (requires Node; see frontend/package.json)
 cd frontend && npm ci
 npm run build                     # tsc -b && vite build -> frontend/dist
@@ -329,6 +339,21 @@ installing the `web` extra (`uv sync --all-extras`): with
 `ignore_missing_imports = true`, an uninstalled FastAPI/pydantic would degrade
 every `src/remo_cli/web/` module to `Any` and leave the type gate passing while
 checking nothing.
+
+### Pre-release testing (Principle IX)
+
+PyPI receives only final, working releases. Everything before that flows
+off-index, escalating only as needed: **Tier 1** git refs (`uvx --from git+…`,
+`uv tool install git+…`) for the inner loop, **Tier 2** the real wheel built by
+`dev-build.yml` — mandatory for any change to packaging surfaces (entry points,
+extras, package data, build config), since Tier 1 exercises the sdist path and
+not the wheel that ships. Non-final versions are PEP 440 pre-release/dev forms;
+dev builds carry a `+g<sha>` local segment that PyPI rejects outright, so a dev
+build cannot leak. Promotion publishes the *identical* validated artifact, never
+a rebuild. TestPyPI is not a dev channel. Principle IX has no CI row — it is
+enforced by the `release` skill's validation gate, by that unremovable local
+segment, and by review; name the tier that validated a packaging change in the
+PR description.
 
 ### Repo-wide pre-commit checklist
 
