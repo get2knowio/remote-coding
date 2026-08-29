@@ -1,6 +1,43 @@
 <!--
   Sync Impact Report
   ===================
+  Version change: 2.0.1 → 2.1.0 (MINOR)
+
+  Bump rationale: one new principle is added (IX. Pre-Release Builds Never
+  Touch PyPI) plus a new Technology Standards subsection and a new Development
+  Workflow checklist. No existing principle is removed or redefined, and the
+  repository already complies (`dev-build.yml`, the `release` skill's
+  "test before PyPI" gate), so no new constraint applies retroactively to
+  existing code. Addition + materially expanded guidance = MINOR.
+
+  Modified principles: None.
+
+  Added principles:
+  - IX. Pre-Release Builds Never Touch PyPI (the three escalating off-index
+    channels, version hygiene, promote-don't-rebuild, and why not TestPyPI)
+
+  Added sections:
+  - Technology Standards → Packaging & Release
+  - Development Workflow → Pre-Release Checklist
+  - Quality Gates → the pre-release channel note (a human gate, deliberately
+    not a fake CI row)
+
+  Removed sections: None.
+
+  Templates requiring updates:
+  - .specify/templates/plan-template.md: ✅ updated (Constitution Check row IX,
+    version reference v2.0.0 → v2.1.0)
+  - .specify/templates/spec-template.md: ✅ no changes needed
+  - .specify/templates/tasks-template.md: ✅ no changes needed
+  - CLAUDE.md: ✅ updated (principle table, Commands, Quality Gates note)
+  - AGENTS.md: ✅ updated (mirrors CLAUDE.md)
+
+  Follow-up TODOs: None
+-->
+
+<!--
+  Sync Impact Report
+  ===================
   Version change: 1.0.0 → 2.0.0 (MAJOR)
 
   Bump rationale: the constitution was written when remo was an Ansible-only
@@ -291,6 +328,71 @@ the parts that can be checked mechanically MUST be.
 Anything a test can check, a test should check, because prose drifts silently
 and diagrams drift fastest.
 
+### IX. Pre-Release Builds Never Touch PyPI
+
+PyPI MUST receive only final, working releases. Every build that is not a
+final release MUST reach its testers through an off-index channel, and MUST be
+exercised there before any upload is considered.
+
+**Rules:**
+
+- Testing a change "in the wild" MUST use the lowest channel that can prove it,
+  escalating only when that channel cannot:
+  - **Tier 1 — git refs (the default inner loop).** GitHub is the carrier; no
+    index is involved. Smoke-test with zero footprint via
+    `uvx --from git+https://github.com/get2knowio/remo@<ref> remo --help`, or
+    daily-drive the branch as the real CLI with
+    `uv tool install git+https://github.com/get2knowio/remo@<ref>` (extras use
+    the PEP 508 form, `"remo-cli[web] @ git+…@<ref>"`). Restore released state
+    with `uv tool install remo-cli --force`.
+  - **Tier 2 — CI-built wheels (release-candidate realism).** The
+    `dev-build.yml` workflow builds the *actual* wheel in clean CI and uploads
+    it as a run artifact; testers install it with
+    `uv tool install --force ./dl/remo_cli-*.whl`. Nothing is tagged, nothing
+    is committed, no version is reserved.
+  - **Tier 3 — a private index** (static PEP 503 index or `devpi`) MUST NOT be
+    stood up until Tiers 1–2 demonstrably chafe. Adding standing
+    infrastructure ahead of that friction is scope, not rigor.
+- A change that touches packaging — entry points, console scripts, package
+  data, optional extras, or build configuration — MUST be validated at Tier 2.
+  Tier 1 builds from source and exercises the *sdist* path, not the wheel that
+  ships, so a Tier 1 pass proves nothing about those surfaces.
+- Version hygiene: anything that is not final MUST carry a PEP 440 pre-release
+  or dev version (`4.4.0rc1`, `4.4.0.dev7`). Resolvers skip these by default,
+  so even a leaked pre-release never reaches a plain
+  `uv tool install remo-cli`.
+- A dev build MUST additionally carry a PEP 440 **local version identifier**
+  (`4.4.0.dev7+g4f2a91c`). PyPI rejects local versions outright, which makes
+  accidental publication structurally impossible rather than merely unlikely,
+  and makes every build uniquely identifiable in `uv tool list`.
+- Promotion MUST publish the identical artifact that was validated, never a
+  rebuild. An RC that proves out is uploaded as-is; a rebuild is a different
+  artifact and re-opens everything the validation closed.
+- Publishing an RC to PyPI MUST require explicit human approval. The default
+  outcome of an RC is a Tier 1 or Tier 2 hand-off; an upload is the exception,
+  taken only when the tester cannot install off-index.
+- TestPyPI MUST NOT be used as a routine dev channel. It is public, shares a
+  namespace, is periodically pruned, and often cannot resolve real
+  dependencies. It is legitimate only to rehearse the publish pipeline itself.
+- When remo depends on an unreleased library, the library MUST be injected
+  rather than vendored or pinned into a release: `uv tool install remo-cli
+  --with "<lib> @ git+…@<ref>"` (or the `uvx --with` form) keeps remo exactly
+  as released and swaps only the library under test. A `git = ` entry under
+  `[tool.uv.sources]` is TEMPORARY and MUST be swapped back to a version
+  constraint before remo's own release — uv sources do not ship in wheel
+  metadata, so a release cut with one in place silently depends on the older
+  PyPI version.
+- None of this applies inside remo's own repo devcontainer, where `uv run`
+  already exercises the working tree. These channels exist for every *other*
+  container and machine.
+
+**Rationale:** A version uploaded to PyPI can never be reused or truly
+withdrawn, so every experimental upload is a permanent, public artifact of a
+build that was not ready. The escalating tiers make the off-index path cheaper
+than publishing at every stage, and the local-version rule turns "don't publish
+a dev build" from a discipline the release runner must remember into something
+the index physically refuses.
+
 ## Technology Standards
 
 ### Python (CLI, core, providers)
@@ -335,6 +437,20 @@ and diagrams drift fastest.
   "achieve exhaustiveness" is a defect, not a cleanup.
 - `npm run lint` (`tsc --noEmit`), `npm run test` (Vitest), and
   `npm run build` MUST pass before commit.
+
+### Packaging & Release
+
+- `pyproject.toml` carries the single `version` field; a build stamped for
+  off-index testing MUST NOT be committed with that stamp in place.
+- Pre-release tags use the PEP 440 form with no separator (`v4.4.0rc1`).
+  `release.yml` keys its pre-release detection off that suffix and MUST NOT
+  move the `latest` container tag for one.
+- `dev-build.yml` is the Tier 2 channel: it stamps `+g<shortsha>` onto every
+  build it produces, so its artifacts are un-uploadable to PyPI by
+  construction. That local segment MUST NOT be removed to "make the wheel
+  publishable" — republishing means cutting a real tag.
+- The PyPI publish step MUST be reachable only from a pushed `v*` tag, and MUST
+  run behind the tests it gates.
 
 ### Ansible (`ansible/`)
 
@@ -389,6 +505,12 @@ uv run python scripts/export_openapi.py   # openapi.json + terminal-frames.json
 cd frontend && npm run generate:types      # schema.d.ts + terminal-frames.d.ts
 ```
 
+Principle IX has no CI row, and MUST NOT be given a decorative one: no gate
+can observe that a human installed a branch and used it. It is enforced by the
+`release` skill's mandatory validation step, by `dev-build.yml`'s unremovable
+`+g<sha>` local segment, and by review. A change to packaging surfaces MUST
+state in its PR description which tier validated it.
+
 The `Lint & Types` job MUST install the `web` extra (`uv sync --all-extras`).
 With `ignore_missing_imports = true`, an uninstalled FastAPI/pydantic would
 silently degrade every `web/` module to `Any` and leave the type gate passing
@@ -411,6 +533,21 @@ while checking nothing.
 6. **Idempotency**: run the mutating path twice; verify the second run is a
    no-op.
 
+### Pre-Release Checklist
+
+Before any upload to PyPI:
+
+1. **Tier chosen**: the change was exercised on a git ref (Tier 1) or, if it
+   touched packaging, on the CI-built wheel (Tier 2).
+2. **Version form**: non-final builds carry a PEP 440 pre-release/dev version;
+   dev builds carry a `+g<sha>` local segment.
+3. **Same artifact**: what is published is the artifact that was validated, not
+   a rebuild of it.
+4. **No stray sources**: no `git = ` entry remains under `[tool.uv.sources]`,
+   and no off-index version stamp remains in `pyproject.toml`.
+5. **Approval**: the publish was explicitly approved by a human, with the
+   reason an off-index hand-off was insufficient.
+
 ### Code Review Focus Areas
 
 Reviewers MUST specifically check:
@@ -423,6 +560,8 @@ Reviewers MUST specifically check:
   strictness
 - Conditional path coverage and regression tests
 - Documentation completeness
+- Packaging-surface changes (entry points, extras, package data) — which
+  pre-release tier validated them
 
 ## Governance
 
@@ -458,4 +597,4 @@ is the defect.
 (current tree, commands, recent changes). They elaborate this constitution;
 they never override it.
 
-**Version**: 2.0.1 | **Ratified**: 2026-01-06 | **Last Amended**: 2026-07-27
+**Version**: 2.1.0 | **Ratified**: 2026-01-06 | **Last Amended**: 2026-08-29
