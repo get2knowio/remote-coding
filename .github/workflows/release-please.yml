@@ -20,6 +20,10 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel — mid-run cancellation can leave the release PR half-amended.
+
 jobs:
   release-please:
     runs-on: ubuntu-latest

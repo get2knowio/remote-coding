@@ -8,6 +8,13 @@ on:
         required: true
         default: ''
 
+permissions:
+  contents: read
+
+concurrency:
+  group: teardown-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel — would orphan partially torn-down cloud resources.
+
 jobs:
   teardown:
     name: Teardown Remote Coding Server

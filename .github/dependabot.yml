@@ -1,7 +1,12 @@
 version: 2
 updates:
-  # Python dependencies (pyproject.toml)
-  - package-ecosystem: "pip"
+  # Python dependencies (pyproject.toml + uv.lock)
+  #
+  # Must be "uv", not "pip": this repo resolves from the committed uv.lock, and
+  # the pip ecosystem does not update that file — it would bump pyproject.toml
+  # and leave the lock (the thing CI and the Docker build actually install
+  # from) untouched.
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"

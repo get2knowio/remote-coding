@@ -5,6 +5,14 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel — a cancelled publish can leave the tag, the GitHub Release,
+  # PyPI and GHCR out of step with each other.
+
 jobs:
   test:
     runs-on: ubuntu-latest

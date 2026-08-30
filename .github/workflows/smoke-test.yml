@@ -30,6 +30,9 @@ concurrency:
   group: smoke-test-${{ github.ref }}
   cancel-in-progress: false  # Never cancel — would orphan cloud resources
 
+permissions:
+  contents: read
+
 jobs:
   # ===========================================================================
   # AWS EC2 — SSM access

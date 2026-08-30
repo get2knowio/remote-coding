@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true  # Superseded by a newer commit on the same ref — results are re-uploaded.
+
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})

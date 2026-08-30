@@ -8,6 +8,18 @@ on:
     - cron: '15 */4 * * *'  # Every 4 hours at :15
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke-test-cleanup
+  # Never cancel: the terminate/delete steps run in sequence (instances, then
+  # key pairs, then security groups), so a cancelled run can leave that
+  # sequence half-applied. Cancelling does not itself create orphans — this
+  # workflow is the safety net that reaps them — but a scheduled run must not
+  # interrupt a manual one mid-delete.
+  cancel-in-progress: false
+
 jobs:
   # ===========================================================================
   # AWS — terminate stale EC2 instances
