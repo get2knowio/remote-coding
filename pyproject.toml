@@ -59,6 +59,13 @@ web = [
 remo-cli = "remo_cli.cli.main:main"
 remo = "remo_cli.cli.main:main"
 
+[tool.uv]
+# Resolver-side twin of the Dependabot cooldown in .github/dependabot.yml: a
+# release must sit for 7 days before any `uv sync`/`uv lock` here will pick it
+# up. Without this, a plain `uv sync` still pulls a just-published transitive
+# dependency that Dependabot would have waited on.
+exclude-newer = "7 days"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/remo_cli"]
 

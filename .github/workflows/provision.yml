@@ -8,6 +8,13 @@ on:
         required: true
         default: ''
 
+permissions:
+  contents: read
+
+concurrency:
+  group: provision-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel — would orphan half-provisioned cloud resources.
+
 jobs:
   provision:
     name: Provision Remote Coding Server

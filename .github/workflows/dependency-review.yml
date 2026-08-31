@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: dependency-review-${{ github.ref }}
+  cancel-in-progress: true  # Superseded by a newer commit on the same ref — the check re-runs.
+
 jobs:
   dependency-review:
     runs-on: ubuntu-latest
