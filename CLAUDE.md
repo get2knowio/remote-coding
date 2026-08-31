@@ -264,8 +264,22 @@ uvx --from git+https://github.com/get2knowio/remo@BRANCH remo --help  # Tier 1, 
 uv tool install git+https://github.com/get2knowio/remo@BRANCH         # Tier 1, daily-drive the branch
 uv tool install "remo-cli[web] @ git+https://github.com/get2knowio/remo@BRANCH"  # with extras
 uv tool install remo-cli --force                                      # back to the released PyPI build
-gh workflow run dev-build.yml -f version=X.Y.ZrcN                     # Tier 2, real wheel in clean CI
-gh run download <run-id> -n remo-wheel -D ./dl && uv tool install --force ./dl/remo_cli-*.whl
+
+# Tier 2 — the real wheel, built in clean CI. Two shapes, and the difference is
+# whether the artifact can later be promoted to PyPI as-is:
+gh workflow run dev-build.yml                                         # dev build: X.Y.Z.devN+g<sha>,
+                                                                      #   un-uploadable, validation only
+gh workflow run dev-build.yml -f version=X.Y.ZrcN                     # RC: canonical, no local segment,
+                                                                      #   so it stays promotable
+gh workflow run dev-build.yml -f version=X.Y.ZrcN -f prerelease=true  # + GitHub pre-release (tag rc-<ver>)
+
+# Install a run artifact (needs gh auth on that machine):
+gh run download <run-id> -R get2knowio/remo -n remo-wheel -D ./dl
+uv tool install --force "remo-cli[web] @ ./dl/remo_cli-<version>-py3-none-any.whl"
+
+# Install from the GitHub pre-release (no gh auth needed anywhere):
+uv tool install --force "remo-cli[web] @ https://github.com/get2knowio/remo/releases/\
+download/rc-<version>/remo_cli-<version>-py3-none-any.whl"
 
 # Frontend (requires Node; see frontend/package.json)
 cd frontend && npm ci
@@ -349,8 +363,13 @@ off-index, escalating only as needed: **Tier 1** git refs (`uvx --from git+…`,
 extras, package data, build config), since Tier 1 exercises the sdist path and
 not the wheel that ships. Non-final versions are PEP 440 pre-release/dev forms;
 dev builds carry a `+g<sha>` local segment that PyPI rejects outright, so a dev
-build cannot leak. Promotion publishes the *identical* validated artifact, never
-a rebuild. TestPyPI is not a dev channel. Principle IX has no CI row — it is
+build cannot leak. An **RC is different**: `dev-build.yml` stamps an explicit
+`X.Y.ZrcN` verbatim with *no* local segment, precisely so the artifact stays
+promotable — promotion publishes the *identical* validated wheel, never a
+rebuild. With `-f prerelease=true` that same wheel is attached to a GitHub
+pre-release under an `rc-<version>` tag (never `v*`, which would trigger
+`release.yml` and its PyPI/GHCR publish), giving a plain URL that installs
+without `gh` auth. TestPyPI is not a dev channel. Principle IX has no CI row — it is
 enforced by the `release` skill's validation gate, by that unremovable local
 segment, and by review; name the tier that validated a packaging change in the
 PR description.

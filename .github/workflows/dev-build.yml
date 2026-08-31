@@ -1,27 +1,51 @@
 name: dev-build
 
-# Build an installable wheel and upload it as a run artifact you can download and
-# test on ANY machine — no git tag, no PyPI, no version reserved.
+# Build an installable wheel for pre-release testing. Two modes, and the
+# difference between them is what the artifact may later become:
 #
-# The stamped version always carries a PEP 440 *local* segment (`+g<shortsha>`),
-# which PyPI rejects outright — so a dev build can never leak to PyPI, and every
-# build is uniquely identifiable.
+#  1. DEV BUILD (no `version` input) -> `X.Y.Z.dev<run>+g<sha>`.
+#     The PEP 440 *local* segment makes it un-uploadable to PyPI by
+#     construction, so it can never leak — and it can never be promoted either.
+#     Validation only. Uploaded as a run artifact (needs `gh` to fetch).
 #
-# Trigger manually:
-#   gh workflow run dev-build.yml                     # -> 2.2.0.dev<run>+g<sha>
-#   gh workflow run dev-build.yml -f version=2.3.0rc1 # -> 2.3.0rc1+g<sha>
+#  2. RELEASE CANDIDATE (`version=X.Y.ZrcN`) -> that version, verbatim.
+#     NO local segment, because a promotable artifact is the entire point: if
+#     the RC proves out it is published to PyPI as-is rather than rebuilt
+#     (constitution IX, "Promotion MUST publish the identical artifact").
+#     Resolvers skip pre-release versions by default, so it is still invisible
+#     to a plain `uv tool install remo-cli`.
+#     With `prerelease: true` it is also attached to a GitHub pre-release, so
+#     other machines can install it by URL with no `gh` auth at all.
 #
-# Then, on any machine:
-#   gh run download <run-id> -n remo-wheel -D ./dl
-#   uv tool install --force ./dl/remo_cli-*.whl
+# NOTHING here publishes to PyPI. The pre-release tag is `rc-*`, which
+# release.yml (`tags: v*`) deliberately does not match.
+#
+# Trigger:
+#   gh workflow run dev-build.yml                                    # dev build
+#   gh workflow run dev-build.yml -f version=4.4.0rc1                # RC, artifact only
+#   gh workflow run dev-build.yml -f version=4.4.0rc1 -f prerelease=true
+#
+# Install on any machine:
+#   # run artifact (needs gh auth)
+#   gh run download <run-id> -R get2knowio/remo -n remo-wheel -D ./dl
+#   uv tool install --force "remo-cli[web] @ ./dl/remo_cli-<version>-py3-none-any.whl"
+#   # GitHub pre-release (no gh auth)
+#   uv tool install --force "remo-cli[web] @ https://github.com/get2knowio/remo/releases/download/rc-<version>/remo_cli-<version>-py3-none-any.whl"
+#   # revert to the released build
+#   uv tool install remo-cli --force
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Full base version to stamp (e.g. 2.3.0rc1, 2.3.0). Blank = auto dev version from pyproject. A +g<sha> local segment is always appended."
+        description: "PEP 440 pre-release version to stamp (e.g. 4.4.0rc1, 4.4.0.dev5). Blank = auto dev version, which additionally gets a +g<sha> local segment. A final version (4.4.0) is refused — those come from the release process."
         required: false
         default: ""
+      prerelease:
+        description: "Also attach the wheel to a GitHub pre-release (tag rc-<version>) so it installs by URL without gh auth. Requires an explicit version. Never publishes to PyPI."
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -33,6 +57,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -40,23 +66,35 @@ jobs:
 
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
-      - name: Compute dev version
+      - name: Compute version
         id: ver
         env:
           INPUT_VERSION: ${{ inputs.version }}
+          WANT_PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
           SHA=$(git rev-parse --short HEAD)
           if [ -n "$INPUT_VERSION" ]; then
-            BASE="$INPUT_VERSION"
+            # An explicit version must be a PEP 440 pre-release or dev release.
+            # Refusing a final version here is what keeps this workflow from
+            # ever producing something that looks like a real release.
+            if ! printf '%s' "$INPUT_VERSION" \
+              | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+|\.dev[0-9]+)$'; then
+              echo "::error::'$INPUT_VERSION' is not a PEP 440 pre-release/dev version (expected e.g. 4.4.0rc1, 4.4.0b2, 4.4.0.dev5). Final versions are cut by release-please + release.yml, not here."
+              exit 1
+            fi
+            # Verbatim: no local segment, so this artifact stays promotable.
+            VERSION="$INPUT_VERSION"
           else
-            # Core X.Y.Z from pyproject, plus a per-run .dev segment.
+            if [ "$WANT_PRERELEASE" = "true" ]; then
+              echo "::error::prerelease=true needs an explicit version. An auto dev build carries a +g<sha> local segment, which PyPI rejects — it can never be promoted, so publishing it as a release asset would be misleading."
+              exit 1
+            fi
             CORE=$(grep -m1 '^version = ' pyproject.toml \
               | sed -E 's/version = "([0-9]+\.[0-9]+\.[0-9]+).*"/\1/')
-            BASE="${CORE}.dev${GITHUB_RUN_NUMBER}"
+            # Local segment: unique, and un-uploadable to PyPI by construction.
+            VERSION="${CORE}.dev${GITHUB_RUN_NUMBER}+g${SHA}"
           fi
-          # Always append the local segment: unique + un-uploadable to PyPI.
-          VERSION="${BASE}+g${SHA}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Building version: $VERSION"
 
@@ -80,3 +118,67 @@ jobs:
           path: dist/*
           retention-days: 30
           if-no-files-found: error
+
+  prerelease:
+    # Attaches the SAME artifact the build job produced to a GitHub pre-release
+    # — it does not rebuild. Separate job so `contents: write` is scoped to the
+    # step that needs it and the common dev-build path stays read-only.
+    needs: build
+    if: ${{ inputs.prerelease }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download the built artifact
+        # NOTE: SHA-pin alongside upload-artifact above.
+        uses: actions/download-artifact@v6
+        with:
+          name: remo-wheel
+          path: dist
+
+      - name: Create GitHub pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          TAG="rc-${VERSION}"
+          # Hard stop: a v-prefixed tag would trigger release.yml, which
+          # publishes to PyPI and GHCR. This workflow must never do that.
+          case "$TAG" in
+            v*) echo "::error::refusing to create tag '$TAG' — it would trigger release.yml"; exit 1 ;;
+          esac
+          ls -la dist/
+          WHEEL_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}/remo_cli-${VERSION}-py3-none-any.whl"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          # Quoted heredoc: the notes contain backticks, which an unquoted one
+          # would run as command substitution. Placeholders are filled in after.
+          cat > /tmp/notes.md <<'NOTES'
+          Pre-release build for testing. **Not published to PyPI.**
+
+          Install on any machine (no `gh` auth needed):
+
+          ```bash
+          uv tool install --force "remo-cli[web] @ __WHEEL_URL__"
+          ```
+
+          Revert to the released build:
+
+          ```bash
+          uv tool install remo-cli --force
+          ```
+
+          Built from `__SHA__` by [this run](__RUN_URL__).
+          NOTES
+          sed -i \
+            -e "s|__WHEEL_URL__|${WHEEL_URL}|" \
+            -e "s|__SHA__|${GITHUB_SHA}|" \
+            -e "s|__RUN_URL__|${RUN_URL}|" \
+            /tmp/notes.md
+          gh release create "$TAG" dist/* \
+            --title "Release candidate $VERSION" \
+            --prerelease \
+            --notes-file /tmp/notes.md
+          echo "Created pre-release $TAG"
