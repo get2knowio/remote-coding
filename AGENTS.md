@@ -271,6 +271,8 @@ gh workflow run dev-build.yml                                         # dev buil
 gh workflow run dev-build.yml -f version=X.Y.ZrcN                     # RC: canonical, no local segment,
                                                                       #   so it stays promotable
 gh workflow run dev-build.yml -f version=X.Y.ZrcN -f prerelease=true  # + GitHub pre-release (tag rc-<ver>)
+gh workflow run dev-build.yml -f version=X.Y.ZrcN -f prerelease=true -f image=true  # + remo-web:<ver> image (never latest)
+gh workflow run rc-image.yml -f version=X.Y.ZrcN                      # image only, for an existing rc-<ver> tag
 
 # Install a run artifact (needs gh auth on that machine):
 gh run download <run-id> -R get2knowio/remo -n remo-wheel -D ./dl
@@ -368,7 +370,10 @@ promotable — promotion publishes the *identical* validated wheel, never a
 rebuild. With `-f prerelease=true` that same wheel is attached to a GitHub
 pre-release under an `rc-<version>` tag (never `v*`, which would trigger
 `release.yml` and its PyPI/GHCR publish), giving a plain URL that installs
-without `gh` auth. TestPyPI is not a dev channel. Principle IX has no CI row — it is
+without `gh` auth. Add `-f image=true` (or run `rc-image.yml` for an existing
+`rc-<version>` tag) to also publish `ghcr.io/get2knowio/remo-web:<version>` —
+the deployable half of an RC for Compose-based installs such as a Hola catalog
+channel — tagged only by its exact version, never `latest`. TestPyPI is not a dev channel. Principle IX has no CI row — it is
 enforced by the `release` skill's validation gate, by that unremovable local
 segment, and by review; name the tier that validated a packaging change in the
 PR description.

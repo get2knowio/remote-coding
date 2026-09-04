@@ -1,0 +1,151 @@
+name: rc-image
+
+# Publish the remo-web container image for a PRE-RELEASE version.
+#
+# release.yml builds and pushes `ghcr.io/<owner>/remo-web` only for `v*` tags,
+# and the RC lane (dev-build.yml) deliberately tags pre-releases `rc-*` so it
+# never trips release.yml. That left pre-releases with a wheel but no image —
+# and an image is what a Compose-based deployment (e.g. a Hola catalog bundle
+# on a `beta`/`rc` channel) needs to pin.
+#
+# This workflow fills that gap. It builds docker/Dockerfile at the requested ref
+# with pyproject.toml stamped to the requested pre-release version — the same
+# stamp dev-build.yml applies before `uv build`, so the image carries the same
+# version the wheel does — and pushes ONLY `:<version>`. `latest` is never
+# produced here (flavor latest=false and no raw `latest` tag), so an rc can
+# never become what docker/compose.example.yml pulls by default.
+#
+# NOTHING here publishes to PyPI or creates a git tag.
+#
+# Trigger:
+#   gh workflow run rc-image.yml -f version=4.4.0rc1                    # ref defaults to rc-4.4.0rc1
+#   gh workflow run rc-image.yml -f version=4.4.0rc1 -f ref=<sha>
+#   dev-build.yml -f prerelease=true -f image=true                       # calls this workflow
+#
+# Pin it from Compose by digest (printed in the job summary):
+#   image: ghcr.io/get2knowio/remo-web:4.4.0rc1@sha256:<digest>
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "PEP 440 pre-release version to build and tag the image with (e.g. 4.4.0rc1, 4.4.0b2). A final version (4.4.0) is refused — those images come from release.yml."
+        required: true
+      ref:
+        description: "Git ref to build from. Blank = the pre-release tag rc-<version> that dev-build.yml created."
+        required: false
+        default: ""
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+      ref:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rc-image-${{ inputs.version }}
+  cancel-in-progress: false  # Never cancel — a half-pushed multi-arch manifest is worse than a slow one.
+
+jobs:
+  publish-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    # An emulated arm64 build (npm ci + pip install under QEMU) dominates
+    # this job's runtime, exactly as in release.yml.
+    timeout-minutes: 60
+
+    steps:
+      - name: Validate version and resolve ref
+        id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          VERSION="$INPUT_VERSION"
+          # Pre-release or dev release only (PEP 440). Refusing a final version
+          # keeps this workflow from ever producing an image release.yml would
+          # also produce, with a different provenance.
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+|\.dev[0-9]+)$ ]]; then
+            echo "::error::'$VERSION' is not a PEP 440 pre-release/dev version (expected e.g. 4.4.0rc1, 4.4.0b2, 4.4.0.dev5). Final versions are published by release.yml, not here."
+            exit 1
+          fi
+          REF="${INPUT_REF:-rc-${VERSION}}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "Building remo-web:$VERSION from $REF"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.ver.outputs.ref }}
+
+      - name: Stamp version into pyproject.toml
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Same stamp dev-build.yml applies before `uv build`: the wheel the
+          # Dockerfile builds from this checkout reports the pre-release version.
+          sed -i -E "0,/^version = \".*\"/s//version = \"${VERSION}\"/" pyproject.toml
+          grep -m1 '^version = ' pyproject.toml
+
+      # Needed for the linux/arm64 half of the manifest: GitHub's runners are
+      # amd64, so arm64 is cross-built under emulation.
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags and labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/remo-web
+          # latest=false and a single raw tag: a pre-release image is reachable
+          # only by its exact version, never by `latest` or `major.minor`.
+          flavor: latest=false
+          tags: |
+            type=raw,value=${{ steps.ver.outputs.version }}
+
+      - name: Build and push (amd64 + arm64)
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          # Includes org.opencontainers.image.source, which is what links the
+          # published GHCR package back to this repository.
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Report the pinnable reference
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          REF: ${{ steps.ver.outputs.ref }}
+        run: |
+          {
+            echo "## remo-web pre-release image"
+            echo
+            echo "Built from \`$REF\` (\`$GITHUB_SHA\`)."
+            echo
+            echo '```'
+            echo "ghcr.io/${GITHUB_REPOSITORY_OWNER}/remo-web:${VERSION}@${DIGEST}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "ghcr.io/${GITHUB_REPOSITORY_OWNER}/remo-web:${VERSION}@${DIGEST}"

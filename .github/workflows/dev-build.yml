@@ -20,10 +20,16 @@ name: dev-build
 # NOTHING here publishes to PyPI. The pre-release tag is `rc-*`, which
 # release.yml (`tags: v*`) deliberately does not match.
 #
+# With `image=true` (requires `prerelease=true`) it also publishes the remo-web
+# container image for the same version via rc-image.yml —
+# `ghcr.io/<owner>/remo-web:<version>`, never `latest` — so a Compose-based
+# deployment can pin the pre-release by digest. See rc-image.yml.
+#
 # Trigger:
 #   gh workflow run dev-build.yml                                    # dev build
 #   gh workflow run dev-build.yml -f version=4.4.0rc1                # RC, artifact only
 #   gh workflow run dev-build.yml -f version=4.4.0rc1 -f prerelease=true
+#   gh workflow run dev-build.yml -f version=4.4.0rc1 -f prerelease=true -f image=true
 #
 # Install on any machine:
 #   # run artifact (needs gh auth)
@@ -43,6 +49,11 @@ on:
         default: ""
       prerelease:
         description: "Also attach the wheel to a GitHub pre-release (tag rc-<version>) so it installs by URL without gh auth. Requires an explicit version. Never publishes to PyPI."
+        type: boolean
+        required: false
+        default: false
+      image:
+        description: "Also publish the remo-web container image ghcr.io/<owner>/remo-web:<version> for this pre-release (rc-image.yml). Requires prerelease=true. Never moves `latest`."
         type: boolean
         required: false
         default: false
@@ -182,3 +193,17 @@ jobs:
             --prerelease \
             --notes-file /tmp/notes.md
           echo "Created pre-release $TAG"
+
+  image:
+    # Publishes the container image for the same pre-release version, from the
+    # same commit the wheel was built from. Delegated to rc-image.yml so the
+    # image can also be (re)built on its own for an existing `rc-*` tag.
+    needs: [build, prerelease]
+    if: ${{ inputs.prerelease && inputs.image }}
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/rc-image.yml
+    with:
+      version: ${{ needs.build.outputs.version }}
+      ref: ${{ github.sha }}
